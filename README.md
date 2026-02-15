@@ -202,31 +202,6 @@ This is a **research prototype**, not a production system. Consider:
 # May require accessibility permissions
 sudo python main.py
 ```
-
-#### Keyboard Input Not Detected
-- Ensure `pynput` is properly installed
-- Check system accessibility settings
-- Try running with administrator privileges
-
-#### Baseline File Corruption
-- Delete `baseline_profile.json` and re-register
-- Check file permissions in project directory
-
-## Future Enhancements
-
-### Production-Ready Features
-- Machine learning-based pattern recognition
-- Multi-keyboard profile support
-- Adaptive threshold adjustment
-- Integration with enterprise authentication systems
-- Mobile device support
-
-### Advanced Analytics
-- Typing pressure analysis (with specialized hardware)
-- Rhythm pattern recognition
-- Contextual behavior modeling
-- Anomaly clustering and classification
-
 ## Contributing
 
 This is a research demonstration. For production implementations, consider:
@@ -235,10 +210,6 @@ This is a research demonstration. For production implementations, consider:
 2. **User Testing**: Extensive usability studies
 3. **Performance Testing**: Load and stress testing
 4. **Compliance**: Regulatory requirements analysis
-
-## License
-
-This research prototype is provided for educational and research purposes. Please ensure proper security review before any production use.
 
 ## Academic References
 
