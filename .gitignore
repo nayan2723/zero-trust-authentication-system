@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Test output artifacts
+test_out*.txt
+test_result*.txt
+
+# Security log (runtime artifact, not source)
+security_log.txt
+
+# Virtual environments
+venv/
+.env/
+env/
+
+# IDE
+.vscode/
+.idea/
