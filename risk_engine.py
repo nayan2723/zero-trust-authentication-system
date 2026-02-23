@@ -15,20 +15,20 @@ Weights are module-level constants and can be tuned freely.
 import math
 import statistics
 
+import config
+
 
 # ---------------------------------------------------------------------------
-# Configurable weights (must sum to 1.0 for normalized scoring)
+# Weights and thresholds — sourced from config.py (single source of truth)
+# Exposed as module-level names for backward compatibility.
 # ---------------------------------------------------------------------------
-W1 = 0.30   # Flight time deviation weight
-W2 = 0.20   # Dwell time deviation weight
-W3 = 0.30   # Bigram timing deviation weight
-W4 = 0.20   # Rhythm vector distance weight
-
-# Dynamic threshold multiplier: threshold = flight_std * K
-THRESHOLD_K = 2.5
-
-# Minimum dwell/flight samples required for reliable scoring
-MIN_SAMPLES = 3
+W1          = config.W1
+W2          = config.W2
+W3          = config.W3
+W4          = config.W4
+THRESHOLD_K = config.THRESHOLD_K
+MIN_SAMPLES = config.MIN_SAMPLES
+_FLOOR_STD  = config.FLOOR_STD
 
 
 # ---------------------------------------------------------------------------
@@ -278,18 +278,17 @@ def dynamic_threshold(flight_std: float, k: float = THRESHOLD_K) -> float:
     """
     Compute an adaptive authentication threshold.
 
-    threshold = flight_std * k
+    threshold = max(flight_std, FLOOR_STD) * k
 
     A tighter typist (low std) gets a tighter threshold.
     A loose typist (high std) gets more slack.
 
     Args:
         flight_std: Standard deviation of baseline flight times
-        k:          Multiplier (default 2.5, matches academic literature)
+        k:          Multiplier (default from config.THRESHOLD_K = 2.5)
 
     Returns:
         Threshold value (seconds)
     """
-    # Guard: always have a sensible floor so no one gets locked out trivially
-    std = max(flight_std, 0.02)
+    std = max(flight_std, _FLOOR_STD)
     return round(std * k, 4)

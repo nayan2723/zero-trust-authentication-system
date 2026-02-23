@@ -30,16 +30,18 @@ import threading
 from keystroke import capture_keystrokes
 from trust_engine import TrustEngine
 import ui_console as ui
+import config
+import risk_engine
 
 
 # ---------------------------------------------------------------------------
-# Configuration  (authentication logic – DO NOT CHANGE)
+# Configuration — all constants sourced from config.py
 # ---------------------------------------------------------------------------
 
-REGISTRATION_TEXT   = "zero trust systems rely on continuous verification"
-VERIFICATION_TEXT   = "continuous authentication enhances security posture"
-REVERIFICATION_TEXT = "trust no one verify always"
-RE_VERIFY_INTERVAL  = 30
+REGISTRATION_TEXT   = config.REGISTRATION_TEXT
+VERIFICATION_TEXT   = config.VERIFICATION_TEXT
+REVERIFICATION_TEXT = config.REVERIFICATION_TEXT
+RE_VERIFY_INTERVAL  = config.RE_VERIFY_INTERVAL
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +57,8 @@ class ZeroTrustAuthSystem:
     def __init__(self):
         self.trust_engine      = TrustEngine()
         self._session_active   = False
-        self._session_lock     = threading.Lock()
+        # Note: _session_lock removed — session_active is only mutated on the
+        # main thread; the Lock was unused dead code (Phase 0 / P6).
         self._last_assessment  = None   # held in memory for diagnostics display
 
     # ------------------------------------------------------------------
@@ -261,16 +264,16 @@ class ZeroTrustAuthSystem:
             self._session_active = False
 
     def _lock_session(self) -> None:
-        """Immediately terminate the session – presentation only, logic unchanged."""
+        """Immediately terminate the session."""
         self._session_active = False
-        from colorama import Fore, Style
-        print(f"\n{Fore.RED}{'!' * 62}{Style.RESET_ALL}")
+        # Use ui_console exclusively — no bare colorama imports in orchestrator.
+        ui.print_alert("!" * 60)
         ui.print_alert("  SESSION LOCKED")
         ui.print_alert("  Typing behavior deviated significantly from your baseline.")
         ui.print_alert("  Access has been REVOKED for security.")
         ui.print_alert("  Please re-register or contact your system administrator.")
-        print(f"{Fore.RED}{'!' * 62}{Style.RESET_ALL}")
-        ui.log_event("LOCK ", "SESSION LOCKED – behavioral anomaly exceeded threshold")
+        ui.print_alert("!" * 60)
+        ui.log_event("LOCK", "SESSION LOCKED - behavioral anomaly exceeded threshold")
 
     # ------------------------------------------------------------------
     # Option 4 – View Security Logs
@@ -288,7 +291,17 @@ class ZeroTrustAuthSystem:
     def view_diagnostics(self) -> None:
         ui.clear_screen()
         ui.print_header()
-        ui.view_trust_diagnostics(self.trust_engine, self._last_assessment)
+        # Compute threshold here (in the auth layer) and pass to ui — keeps
+        # ui_console free of risk_engine imports (SPEC interface contract).
+        threshold = None
+        try:
+            baseline  = self.trust_engine.load_baseline()
+            threshold = risk_engine.dynamic_threshold(
+                baseline.get("flight_std", config.FLOOR_STD)
+            )
+        except FileNotFoundError:
+            pass
+        ui.view_trust_diagnostics(self.trust_engine, self._last_assessment, threshold)
 
     # ------------------------------------------------------------------
     # Main loop

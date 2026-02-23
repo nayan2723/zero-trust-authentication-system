@@ -17,6 +17,8 @@ import sys
 import time
 import datetime
 
+import config
+
 # ---------------------------------------------------------------------------
 # Colorama initialization – graceful fallback if not installed
 # ---------------------------------------------------------------------------
@@ -37,15 +39,14 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Log file path (placed alongside the other project files)
+# Constants — sourced from config.py (single source of truth)
 # ---------------------------------------------------------------------------
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "security_log.txt")
-
-
-# ---------------------------------------------------------------------------
-# Console layout constants
-# ---------------------------------------------------------------------------
-WIDTH = 62   # total inner width
+LOG_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           config.LOG_FILE)
+WIDTH      = config.UI_WIDTH
+BAR_WIDTH  = config.BAR_WIDTH
+FILLED_CHAR = config.FILLED_CHAR
+EMPTY_CHAR  = config.EMPTY_CHAR
 
 HEADER = f"""
 {Fore.CYAN}{'=' * WIDTH}
@@ -118,9 +119,7 @@ def print_label(label: str, value: str, width: int = 40) -> None:
 # 4. Risk score visualization bar
 # ---------------------------------------------------------------------------
 
-BAR_WIDTH   = 30   # total blocks in the bar
-FILLED_CHAR = "\u2588"   # █
-EMPTY_CHAR  = "\u2591"   # ░
+# BAR_WIDTH, FILLED_CHAR, EMPTY_CHAR are imported from config at module level above.
 
 
 def display_risk_bar(risk: float, threshold: float) -> None:
@@ -277,13 +276,19 @@ def view_security_logs(max_lines: int = 40) -> None:
 # 8. Trust Engine diagnostic display
 # ---------------------------------------------------------------------------
 
-def view_trust_diagnostics(trust_engine, last_assessment: dict | None = None) -> None:
+def view_trust_diagnostics(
+    trust_engine,
+    last_assessment: dict | None = None,
+    threshold: float | None = None,
+) -> None:
     """
     Display read-only diagnostic metrics from the loaded baseline profile.
 
     Args:
         trust_engine    : TrustEngine instance (for .load_baseline())
         last_assessment : Most recent risk assessment dict, or None
+        threshold       : Pre-computed adaptive threshold (avoids importing
+                          risk_engine here — caller computes and passes it)
     """
     section_banner("TRUST ENGINE DIAGNOSTICS  [READ-ONLY]", Fore.CYAN)
 
@@ -293,12 +298,11 @@ def view_trust_diagnostics(trust_engine, last_assessment: dict | None = None) ->
         print_warning("No baseline profile found. Please register first (Option 1).")
         return
 
-    # Import lazily to avoid circular deps
-    try:
-        import risk_engine as _re
-        threshold = _re.dynamic_threshold(baseline.get("flight_std", 0.05))
-    except Exception:
-        threshold = baseline.get("flight_std", 0.05) * 2.5
+    # Threshold comes from the caller; fall back to config-based calculation
+    # only if not provided, to keep this module free of risk_engine imports.
+    if threshold is None:
+        flight_std = baseline.get("flight_std", config.FLOOR_STD)
+        threshold  = max(flight_std, config.FLOOR_STD) * config.THRESHOLD_K
 
     print(f"\n{Fore.CYAN}  --- Baseline Profile ---{Style.RESET_ALL}")
     print_label("Flight time average  :",   f"{baseline.get('flight_avg', 0):.4f} s")

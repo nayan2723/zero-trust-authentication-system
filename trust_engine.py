@@ -23,6 +23,21 @@ import statistics
 import os
 
 import risk_engine
+import config
+
+
+# ---------------------------------------------------------------------------
+# Baseline schema: required keys and their expected Python types.
+# Used by validate_baseline() to catch corrupt or outdated profiles.
+# ---------------------------------------------------------------------------
+_REQUIRED_BASELINE_KEYS: dict[str, type] = {
+    "flight_avg":    float,
+    "flight_std":    float,
+    "dwell_avg":     float,
+    "dwell_std":     float,
+    "bigram_avg":    dict,
+    "rhythm_vector": list,
+}
 
 
 class TrustEngine:
@@ -30,7 +45,7 @@ class TrustEngine:
     Manages the user's behavioral biometric baseline and trust decisions.
     """
 
-    def __init__(self, baseline_file: str = "baseline_profile.json"):
+    def __init__(self, baseline_file: str = config.BASELINE_FILE):
         self.baseline_file = baseline_file
         # No static threshold – dynamic_threshold() in risk_engine is used instead.
 
