@@ -1,4 +1,8 @@
 {
-  "avg_interval": 0.311,
-  "std_interval": 0.267
+  "flight_avg": 0.0,
+  "flight_std": 0.05,
+  "dwell_avg": 0.0,
+  "dwell_std": 0.02,
+  "bigram_avg": {},
+  "rhythm_vector": []
 }

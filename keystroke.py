@@ -1,137 +1,263 @@
+"""
+keystroke.py - Multi-Metric Keystroke Capture Engine
+=====================================================
+Captures the following behavioral biometric signals:
+  - Flight times  : interval between consecutive key presses
+  - Dwell times   : duration each key is held down (release - press)
+  - Bigram timings: flight time for specific consecutive character pairs
+  - Rhythm vector : ordered list of all flight times (full temporal sequence)
+
+Returns a structured dict for downstream risk analysis.
+"""
+
 import time
 from pynput import keyboard
 import threading
 import sys
 
 
+# Bigrams of interest – can be extended for any passphrase
+TARGET_BIGRAMS = [
+    "ze", "er", "ro", "co", "on", "nt", "ti", "in",
+    "se", "ec", "ur", "ri", "it", "tr", "ru", "us",
+    "st", "em", "au", "th", "he", "en", "ca", "at",
+    "io", "an",
+]
+
+
 class KeystrokeCapture:
+    """
+    Dual-listener keystroke capture.
+
+    Registers both on_press and on_release callbacks so that:
+      - press timestamps  → flight times & bigram times
+      - release timestamps → dwell times
+    """
+
     def __init__(self):
-        self.intervals = []
-        self.last_time = None
+        # --- timing accumulators ---
+        self.flight_times = []      # interval between consecutive presses
+        self.dwell_times = []       # how long each key was held
+        self.bigrams = {}           # {"co": [0.18, 0.20], ...}
+        self.rhythm_vector = []     # same as flight_times (explicit copy for vector math)
+
+        # --- internal state ---
+        self._press_times = {}      # key → press timestamp (for dwell)
+        self._last_press_time = None
+        self._prev_char = None      # previous character (for bigram detection)
+        self._typed_chars = []      # running list of typed characters
+
         self.capturing = False
-        self.target_text = ""
-        self.typed_text = ""
         self.capture_complete = threading.Event()
         self.listener = None
-        self.max_interval = 3.0  # Filter out pauses longer than 3 seconds
-        self.recent_chars = []  # Track recent characters for :q detection
-    
-    def capture_keystroke_intervals(self, prompt_text):
+
+        # Filter out pauses longer than this (seconds)
+        self.max_interval = 3.0
+
+        # Escape sequence state (:q to finish)
+        self._recent_chars = []
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def capture_keystrokes(self, prompt_text: str) -> dict:
         """
-        Capture keystroke intervals for a given prompt text.
-        
+        Capture multi-metric keystroke data for the given prompt.
+
         Args:
-            prompt_text (str): The text user should type
-            
+            prompt_text (str): Sentence the user is asked to type.
+
         Returns:
-            list: List of time intervals between keystrokes
+            dict with keys:
+                flight_times  (list[float])
+                dwell_times   (list[float])
+                bigrams       (dict[str, list[float]])
+                rhythm_vector (list[float])
+                chars         (str)
         """
-        self.target_text = prompt_text.lower()
-        self.intervals = []
-        self.last_time = None
-        self.typed_text = ""
-        self.recent_chars = []
+        # Reset state
+        self.flight_times = []
+        self.dwell_times = []
+        self.bigrams = {}
+        self.rhythm_vector = []
+        self._press_times = {}
+        self._last_press_time = None
+        self._prev_char = None
+        self._typed_chars = []
+        self._recent_chars = []
         self.capturing = True
         self.capture_complete.clear()
-        
+
         print(f"\nType the following sentence:")
-        print(f'"{prompt_text}"')
-        print("Type ':q' when finished typing.\n")
+        print(f'  "{prompt_text}"')
+        print("Type ':q' when finished.\n")
         print("Start typing...")
-        
-        # Clear any pending input
-        sys.stdin.flush()
-        
-        # Start keyboard listener with better error handling
+
         try:
-            self.listener = keyboard.Listener(on_press=self._on_key_press)
-            self.listener.daemon = True  # Set as daemon thread
+            sys.stdin.flush()
+        except Exception:
+            pass
+
+        try:
+            self.listener = keyboard.Listener(
+                on_press=self._on_key_press,
+                on_release=self._on_key_release,
+            )
+            self.listener.daemon = True
             self.listener.start()
-            
-            # Wait for capture to complete with timeout
-            self.capture_complete.wait(timeout=60)  # 60 second timeout
-            
+            # Wait up to 90 seconds for the user to finish
+            self.capture_complete.wait(timeout=90)
         except Exception as e:
-            print(f"Error starting keyboard listener: {e}")
-            return []
-        
-        # Stop listener and wait for thread to finish
+            print(f"Keyboard listener error: {e}")
+            return self._empty_result()
+
+        # Clean up listener
         if self.listener:
             try:
                 self.listener.stop()
-                self.listener.join(timeout=2.0)  # Wait up to 2 seconds for thread to finish
+                self.listener.join(timeout=2.0)
             except Exception:
-                pass  # Ignore cleanup errors
-        
-        # Add delay to ensure complete cleanup
+                pass
+
         time.sleep(0.2)
-        
-        # Simple input buffer clear
+
         try:
             sys.stdin.flush()
-        except:
+        except Exception:
             pass
-        
-        # Filter out extreme intervals (pauses longer than 3 seconds)
-        filtered_intervals = [interval for interval in self.intervals if interval <= self.max_interval]
-        
-        return filtered_intervals
-    
+
+        return {
+            "flight_times":  self.flight_times,
+            "dwell_times":   self.dwell_times,
+            "bigrams":       self.bigrams,
+            "rhythm_vector": list(self.flight_times),  # identical sequence, separate reference
+            "chars":         "".join(self._typed_chars),
+        }
+
+    # ------------------------------------------------------------------
+    # Internal event handlers
+    # ------------------------------------------------------------------
+
     def _on_key_press(self, key):
-        """Handle key press events."""
+        """Record key-press timestamp; derive flight time and bigram timing."""
         if not self.capturing:
             return
-        
+
         current_time = time.time()
-        
+
         try:
-            # Handle regular character keys
-            if hasattr(key, 'char') and key.char is not None:
-                char = key.char.lower()
-                self.typed_text += char
-                
-                # Track recent characters for :q detection
-                self.recent_chars.append(char)
-                if len(self.recent_chars) > 2:
-                    self.recent_chars.pop(0)
-                
-                # Check for :q pattern
-                if len(self.recent_chars) == 2 and self.recent_chars[0] == ':' and self.recent_chars[1] == 'q':
-                    self._finish_capture()
-                    return
-                
-                # Record interval after first character
-                if self.last_time is not None:
-                    interval = current_time - self.last_time
-                    # Only record intervals under 3 seconds to filter out extreme pauses
-                    if interval <= self.max_interval:
-                        self.intervals.append(interval)
-                
-                self.last_time = current_time
-                    
+            char = key.char
+            if char is None:
+                return
         except AttributeError:
-            # Ignore special keys completely - we only care about character keys
-            pass
-    
+            # Special key (Shift, Ctrl, …) – skip
+            return
+
+        char_lower = char.lower()
+        self._typed_chars.append(char_lower)
+
+        # --- Escape sequence detection (:q) ---
+        self._recent_chars.append(char_lower)
+        if len(self._recent_chars) > 2:
+            self._recent_chars.pop(0)
+        if (len(self._recent_chars) == 2
+                and self._recent_chars[0] == ':'
+                and self._recent_chars[1] == 'q'):
+            self._finish_capture()
+            return
+
+        # --- Flight time (interval between consecutive presses) ---
+        if self._last_press_time is not None:
+            flight = current_time - self._last_press_time
+            if flight <= self.max_interval:
+                self.flight_times.append(round(flight, 4))
+                self.rhythm_vector.append(round(flight, 4))
+
+                # --- Bigram timing ---
+                if self._prev_char is not None:
+                    bigram_key = self._prev_char + char_lower
+                    if bigram_key in TARGET_BIGRAMS:
+                        self.bigrams.setdefault(bigram_key, []).append(round(flight, 4))
+
+        # Update state for next keypress
+        self._last_press_time = current_time
+        self._prev_char = char_lower
+
+        # Record press time for dwell computation
+        self._press_times[char_lower + str(current_time)] = current_time
+
+    def _on_key_release(self, key):
+        """Record key-release timestamp; compute dwell time."""
+        if not self.capturing:
+            return
+
+        release_time = time.time()
+
+        try:
+            char = key.char
+            if char is None:
+                return
+        except AttributeError:
+            return
+
+        char_lower = char.lower()
+
+        # Find the most recent unmatched press for this character
+        # Key in _press_times is "char + str(press_timestamp)"
+        candidates = [
+            (k, v) for k, v in self._press_times.items()
+            if k.startswith(char_lower)
+        ]
+        if candidates:
+            # Take the earliest unmatched press
+            candidates.sort(key=lambda x: x[1])
+            key_id, press_time = candidates[0]
+            del self._press_times[key_id]
+
+            dwell = release_time - press_time
+            if 0 < dwell <= self.max_interval:
+                self.dwell_times.append(round(dwell, 4))
+
     def _finish_capture(self):
-        """Finish the capture process."""
+        """Signal end of capture session."""
         self.capturing = False
         self.capture_complete.set()
-        print(f"\nCaptured {len(self.intervals)} keystroke intervals.")
-        
-        # Add a small delay to ensure all events are processed
+        n_flight = len(self.flight_times)
+        n_dwell  = len(self.dwell_times)
+        n_bigram = sum(len(v) for v in self.bigrams.values())
+        print(f"\n  ✓ Captured {n_flight} flight times | "
+              f"{n_dwell} dwell times | "
+              f"{n_bigram} bigram samples across {len(self.bigrams)} bigrams.")
         time.sleep(0.1)
 
+    @staticmethod
+    def _empty_result() -> dict:
+        return {
+            "flight_times":  [],
+            "dwell_times":   [],
+            "bigrams":       {},
+            "rhythm_vector": [],
+            "chars":         "",
+        }
 
-def capture_keystroke_intervals(prompt_text):
+
+# ---------------------------------------------------------------------------
+# Convenience module-level function
+# ---------------------------------------------------------------------------
+
+def capture_keystrokes(prompt_text: str) -> dict:
     """
-    Convenience function to capture keystroke intervals.
-    
-    Args:
-        prompt_text (str): The text the user should type
-        
+    Capture multi-metric keystroke data.
+
     Returns:
-        list: List of time intervals between keystrokes
+        dict with flight_times, dwell_times, bigrams, rhythm_vector, chars
     """
     capture = KeystrokeCapture()
-    return capture.capture_keystroke_intervals(prompt_text)
+    return capture.capture_keystrokes(prompt_text)
+
+
+# Legacy shim so any old code calling capture_keystroke_intervals still works.
+def capture_keystroke_intervals(prompt_text: str) -> list:
+    """Backward-compatible shim. Returns flight_times only."""
+    return capture_keystrokes(prompt_text).get("flight_times", [])
