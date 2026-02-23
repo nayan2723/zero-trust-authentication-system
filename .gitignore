@@ -1,20 +1,41 @@
-# Python cache
+# =============================================================
+# Runtime-critical files tracked:
+#   main.py, keystroke.py, risk_engine.py, trust_engine.py
+#   trust_engine.py, config.py, ui_console.py
+#   baseline_profile.json, README.md, .gitignore
+# Everything else below is excluded from the repo.
+# =============================================================
+
+# --- Python runtime artifacts ---
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 
-# Test output artifacts
+# --- Runtime-generated files ---
+security_log.txt
 test_out*.txt
 test_result*.txt
+test_p0*.txt
 
-# Security log (runtime artifact, not source)
-security_log.txt
+# --- GSD / AI workflow scaffolding ---
+.agent/
+.gsd/
+adapters/
+GSD-STYLE.md
+PROJECT_RULES.md
+model_capabilities.yaml
 
-# Virtual environments
+# --- Development docs and scripts ---
+docs/
+scripts/
+
+# --- Virtual environments ---
 venv/
 .env/
 env/
 
-# IDE
+# --- IDE ---
 .vscode/
 .idea/
+*.code-workspace
